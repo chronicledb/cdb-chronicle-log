@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   cdb-chronicle-log:
     image: confluentinc/cp-kafka:7.8.3
