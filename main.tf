@@ -1,50 +1,30 @@
 provider "aws" {
-  region = var.aws_region
+  region = var.region
 }
 
 # ---------------------------------------------------------------------------
 # Variables
 # ---------------------------------------------------------------------------
 
-variable "aws_region" {
+variable "region" {
   description = "AWS region to deploy into"
   type        = string
-  default     = "us-east-1"
 }
 
 # ---------------------------------------------------------------------------
-# Look up the default VPC and one of its subnets automatically
+# Shared infrastructure (VPC, subnet) from cdb-shared-infra
 # ---------------------------------------------------------------------------
 
-data "aws_vpc" "default" {
-  default = true
-}
+data "aws_caller_identity" "current" {}
 
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
+data "terraform_remote_state" "shared_infra" {
+  backend = "s3"
+
+  config = {
+    bucket         = "cdb-tf-state-${data.aws_caller_identity.current.account_id}"
+    key            = "shared-infra/terraform.tfstate"
+    region         = var.region
   }
-}
-
-# ---------------------------------------------------------------------------
-# Key Pair
-# ---------------------------------------------------------------------------
-
-resource "tls_private_key" "cdb_chronicle_log_key" {
-  algorithm = "RSA"
-  rsa_bits  = 4096
-}
-
-resource "aws_key_pair" "cdb_chronicle_log_key_pair" {
-  key_name   = "cdb-chronicle-log-key-pair"
-  public_key = tls_private_key.cdb_chronicle_log_key.public_key_openssh
-}
-
-resource "local_file" "cdb_chronicle_log_private_key" {
-  content         = tls_private_key.cdb_chronicle_log_key.private_key_pem
-  filename        = "${path.module}/cdb-chronicle-log-key.pem"
-  file_permission = "0400"
 }
 
 # ---------------------------------------------------------------------------
@@ -53,23 +33,15 @@ resource "local_file" "cdb_chronicle_log_private_key" {
 
 resource "aws_security_group" "cdb_chronicle_log_sg" {
   name        = "cdb-chronicle-log-sg"
-  description = "Allow Kafka and SSH traffic"
-  vpc_id      = data.aws_vpc.default.id
+  description = "Allow Kafka traffic within VPC"
+  vpc_id      = data.terraform_remote_state.shared_infra.outputs.cdb_vpc_id
 
   ingress {
     description = "Kafka broker"
     from_port   = 9092
     to_port     = 9092
     protocol    = "tcp"
-    cidr_blocks = [data.aws_vpc.default.cidr_block]
-  }
-
-  ingress {
-    description = "SSH"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [data.terraform_remote_state.shared_infra.outputs.cdb_vpc_cidr_block]
   }
 
   egress {
@@ -91,46 +63,65 @@ resource "aws_security_group" "cdb_chronicle_log_sg" {
 resource "aws_instance" "cdb_chronicle_log" {
   ami                         = "ami-0ec10929233384c7f"
   instance_type               = "t3.small"
-  key_name                    = aws_key_pair.cdb_chronicle_log_key_pair.key_name
-  subnet_id                   = data.aws_subnets.default.ids[0]
+  subnet_id                   = data.terraform_remote_state.shared_infra.outputs.cdb_public_subnet_id
   vpc_security_group_ids      = [aws_security_group.cdb_chronicle_log_sg.id]
   associate_public_ip_address = true
+  iam_instance_profile        = aws_iam_instance_profile.cdb_chronicle_log.name
+
+  user_data = <<-EOF
+    #!/bin/bash
+    set -e
+
+    # Install Docker
+    apt-get update -y
+    apt-get install -y docker.io
+    systemctl enable docker
+    systemctl start docker
+
+    # Install Docker Compose
+    mkdir -p /usr/local/lib/docker/cli-plugins
+    curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
+      -o /usr/local/lib/docker/cli-plugins/docker-compose
+    chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+    # Write docker-compose.yml
+    echo "${base64encode(file("docker-compose.yml"))}" | base64 -d > /home/ubuntu/docker-compose.template.yml
+
+    # Substitute private IP
+    EC2_PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+    envsubst < /home/ubuntu/docker-compose.template.yml > /home/ubuntu/docker-compose.yml
+    chown ubuntu:ubuntu /home/ubuntu/docker-compose.yml
+
+    # Start Kafka
+    cd /home/ubuntu && docker compose up -d
+  EOF
 
   tags = {
     Name = "cdb-chronicle-log"
   }
+}
 
-  provisioner "file" {
-    source      = "docker-compose.yml"
-    destination = "/home/ubuntu/docker-compose.yml"
+resource "aws_iam_role" "cdb_chronicle_log" {
+  name = "cdb-chronicle-log-role"
 
-    connection {
-      type        = "ssh"
-      user        = "ubuntu"
-      private_key = tls_private_key.cdb_chronicle_log_key.private_key_pem
-      host        = self.public_ip
-    }
-  }
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+}
 
-  provisioner "remote-exec" {
-    connection {
-      type        = "ssh"
-      user        = "ubuntu"
-      private_key = tls_private_key.cdb_chronicle_log_key.private_key_pem
-      host        = self.public_ip
-    }
+resource "aws_iam_role_policy_attachment" "cdb_chronicle_log_ssm" {
+  role       = aws_iam_role.cdb_chronicle_log.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
 
-    inline = [
-      "sudo apt-get update -y",
-      "sudo apt-get install -y docker.io",
-      "sudo systemctl start docker",
-      "sudo usermod -aG docker ubuntu",
-      "sudo mkdir -p /usr/local/lib/docker/cli-plugins",
-      "sudo curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose",
-      "sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose",
-      "cd /home/ubuntu && sudo EC2_PRIVATE_IP=${self.private_ip} docker compose up -d"
-    ]
-  }
+resource "aws_iam_instance_profile" "cdb_chronicle_log" {
+  name = "cdb-chronicle-log-profile"
+  role = aws_iam_role.cdb_chronicle_log.name
 }
 
 # ---------------------------------------------------------------------------
@@ -138,13 +129,9 @@ resource "aws_instance" "cdb_chronicle_log" {
 # ---------------------------------------------------------------------------
 
 output "cdb_chronicle_log_private_ip" {
-  value       = aws_instance.cdb_chronicle_log.private_ip
+  value = aws_instance.cdb_chronicle_log.private_ip
 }
 
 output "cdb_chronicle_log_bootstrap_server" {
-  value       = "${aws_instance.cdb_chronicle_log.private_ip}:9092"
-}
-
-output "cdb_chronicle_log_ssh_command" {
-  value       = "ssh -i cdb-chronicle-log-key.pem ubuntu@${aws_instance.cdb_chronicle_log.public_ip}"
+  value = "${aws_instance.cdb_chronicle_log.private_ip}:9092"
 }
