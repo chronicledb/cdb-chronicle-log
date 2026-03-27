@@ -132,6 +132,6 @@ output "cdb_chronicle_log_private_ip" {
   value = aws_instance.cdb_chronicle_log.private_ip
 }
 
-output "cdb_chronicle_log_bootstrap_server" {
+output "cdb_chronicle_log_kafka_bootstrap_server" {
   value = "${aws_instance.cdb_chronicle_log.private_ip}:9092"
 }
