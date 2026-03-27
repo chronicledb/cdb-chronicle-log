@@ -56,3 +56,5 @@ terraform destroy -auto-approve
 ## A Note on Infrastructure
 
 Yes, this is a single-node Kafka cluster on the smallest viable instance type. No redundancy, no replication, no fault tolerance. If it goes down, it goes down. In fact, it probably will go down. This is a poverty deployment and I am fully aware.
+
+In a production setup, the EC2 instance would be in a private subnet with no public IP, so it’s only reachable inside the VPC (or via SSM), which is more secure. However, it would require a NAT Gateway for outbound internet to download packages, pull Docker images, or run updates. The downside is the NAT Gateway adds a fixed monthly cost. I'm broke so I used a public subnet. Even though the instance is in a public subnet, security groups still restrict Kafka access to internal VPC traffic only, which is sufficient to keep the broker effectively private at the application level.
