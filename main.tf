@@ -11,6 +11,16 @@ variable "region" {
   type        = string
 }
 
+variable "ami" {
+  description = "AMI for the EC2 instance"
+  type        = string
+}
+
+variable "instance_type" {
+  description = "EC2 instance type"
+  type        = string
+}
+
 # ---------------------------------------------------------------------------
 # Shared infrastructure (VPC, subnet) from cdb-shared-infra
 # ---------------------------------------------------------------------------
@@ -61,8 +71,8 @@ resource "aws_security_group" "cdb_chronicle_log_sg" {
 # ---------------------------------------------------------------------------
 
 resource "aws_instance" "cdb_chronicle_log" {
-  ami                         = "ami-0ec10929233384c7f"
-  instance_type               = "t3.small"
+  ami                         = var.ami
+  instance_type               = var.instance_type
   subnet_id                   = data.terraform_remote_state.shared_infra.outputs.cdb_public_subnet_id
   vpc_security_group_ids      = [aws_security_group.cdb_chronicle_log_sg.id]
   associate_public_ip_address = true
