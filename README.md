@@ -4,7 +4,7 @@ Kafka broker for ChronicleDB, deployed on AWS EC2 using Docker and Terraform.
 
 ## Overview
 
-Runs a single-node Kafka cluster (KRaft mode, no Zookeeper) on a `t3.small` EC2 instance. Port 9092 is only accessible from within the same VPC — intended for other EC2 instances in the same network.
+Runs a single-node Kafka cluster (KRaft mode, no Zookeeper) on an EC2 instance. Port 9092 is only accessible from within the same VPC — intended for other EC2 instances in the same network.
 
 ## Prerequisites
 
@@ -13,18 +13,24 @@ Runs a single-node Kafka cluster (KRaft mode, no Zookeeper) on a `t3.small` EC2 
 
 ## Deploy
 
+Create a `terraform.tfvars` file:
+```hcl
+region        = "us-east-1"
+ami           = "ami-0ec10929233384c7f"  # Ubuntu 24.04 LTS, us-east-1
+instance_type = "t3.small"
+```
+
+Then:
 ```bash
 terraform init
 terraform apply -auto-approve
 ```
 
 Terraform will:
-1. Generate an RSA key pair and register it with AWS
-2. Save the private key as `cdb-chronicle-log-key.pem` in the project directory
-3. Create a security group that allows Kafka (port 9092) from within the VPC only, and SSH (port 22) from anywhere
-4. Launch an Ubuntu EC2 instance (`t3.small`) in the default VPC
-5. Install Docker and Docker Compose on the instance
-6. Start the Kafka container
+1. Create a security group that allows Kafka (port 9092) from within the VPC only
+2. Launch an Ubuntu EC2 instance in the shared VPC
+3. Install Docker and Docker Compose on the instance
+4. Start the Kafka container
 
 ## Outputs
 
@@ -33,31 +39,19 @@ After `terraform apply`, the following are printed:
 | Output | Description |
 |---|---|
 | `cdb_chronicle_log_private_ip` | Private IP of the EC2 instance |
-| `cdb_chronicle_log_bootstrap_server` | Kafka bootstrap server address (`<private_ip>:9092`) |
-| `cdb_chronicle_log_ssh_command` | SSH command to connect to the instance |
+| `cdb_chronicle_log_kafka_bootstrap_server` | Kafka bootstrap server address (`<private_ip>:9092`) |
 
 ## Connecting to Kafka
 
 Only EC2 instances within the same VPC can reach the broker. Use the private IP:
-
 ```
 bootstrap-server: <cdb_chronicle_log_private_ip>:9092
 ```
 
 ## Teardown
-
 ```bash
 terraform destroy -auto-approve
 ```
-
-## SSH Access
-
-> **WSL users:** The `.pem` file is saved to the Windows filesystem where `chmod` does not work. Copy it to your WSL home directory first:
-> ```bash
-> cp cdb-chronicle-log-key.pem ~/cdb-chronicle-log-key.pem
-> chmod 400 ~/cdb-chronicle-log-key.pem
-> ssh -i ~/cdb-chronicle-log-key.pem ubuntu@<public_ip>
-> ```
 
 ## A Note on Infrastructure
 
