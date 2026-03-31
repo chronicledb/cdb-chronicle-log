@@ -13,7 +13,14 @@ Runs a single-node Kafka cluster (KRaft mode, no Zookeeper) on an EC2 instance. 
 
 ## Deploy
 
-Create a `terraform.tfvars` file:
+Create a `backend.hcl` file in the repo's root:
+```hcl
+bucket = "cdb-tf-state-<aws-account-id>"
+key    = "chronicle-log/terraform.tfstate"
+region = "us-east-1"
+```
+
+Create a `terraform.tfvars` file in the repo's root:
 ```hcl
 region        = "us-east-1"
 ami           = "ami-0ec10929233384c7f"  # Ubuntu 24.04 LTS, us-east-1

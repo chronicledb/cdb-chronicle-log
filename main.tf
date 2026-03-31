@@ -3,6 +3,14 @@ provider "aws" {
 }
 
 # ---------------------------------------------------------------------------
+# Backend
+# ---------------------------------------------------------------------------
+
+terraform {
+  backend "s3" {}
+}
+
+# ---------------------------------------------------------------------------
 # Variables
 # ---------------------------------------------------------------------------
 
@@ -31,9 +39,9 @@ data "terraform_remote_state" "shared_infra" {
   backend = "s3"
 
   config = {
-    bucket         = "cdb-tf-state-${data.aws_caller_identity.current.account_id}"
-    key            = "shared-infra/terraform.tfstate"
-    region         = var.region
+    bucket = "cdb-tf-state-${data.aws_caller_identity.current.account_id}"
+    key    = "shared-infra/terraform.tfstate"
+    region = var.region
   }
 }
 
@@ -135,7 +143,7 @@ resource "aws_iam_instance_profile" "cdb_chronicle_log" {
 }
 
 # ---------------------------------------------------------------------------
-# Outputs
+# Outputs (written into remote state, readable by other repos)
 # ---------------------------------------------------------------------------
 
 output "cdb_chronicle_log_private_ip" {
