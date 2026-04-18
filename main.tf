@@ -106,8 +106,11 @@ resource "aws_instance" "cdb_chronicle_log" {
     echo "${base64encode(file("docker-compose.yml"))}" | base64 -d > /home/ubuntu/docker-compose.template.yml
 
     # Substitute private IP
-    EC2_PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
-    envsubst < /home/ubuntu/docker-compose.template.yml > /home/ubuntu/docker-compose.yml
+    TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
+      -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+    export EC2_PRIVATE_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
+      http://169.254.169.254/latest/meta-data/local-ipv4)
+    envsubst '$${EC2_PRIVATE_IP}' < /home/ubuntu/docker-compose.template.yml > /home/ubuntu/docker-compose.yml
     chown ubuntu:ubuntu /home/ubuntu/docker-compose.yml
 
     # Start Kafka
